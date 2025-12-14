@@ -2,40 +2,44 @@ import streamlit as st
 import pickle
 import pandas as pd
 from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-import re # Untuk membersihkan teks
+import re 
 import nltk 
-# nltk.download('stopwords') # Jalankan ini SATU KALI di awal jika belum pernah
 from nltk.corpus import stopwords
 import numpy as np
 
-# --- Inisialisasi Stemmer dan Stopwords (Gunakan cache) ---
+# --- 1. INISIALISASI NLP RESOURCES (Menggunakan Cache untuk Efisiensi) ---
 
-# --- Inisialisasi Stemmer dan Stopwords (Gunakan cache) ---
+# Global variable to store loaded resources, accessed globally by preprocess_text
+NLP_RESOURCES = None
 
 @st.cache_resource
 def load_nlp_resources():
-    """Memuat Sastrawi Stemmer dan Stopwords Bahasa Indonesia."""
+    """Memuat Sastrawi Stemmer dan Stopwords Bahasa Indonesia, serta mengunduh data NLTK."""
     
-    # LANGKAH PENTING: Unduh data stopwords NLTK
-    import nltk
+    # LANGKAH PENTING: Unduh data stopwords NLTK secara kondisional
     try:
-        # Coba muat dulu, jika gagal, NLTK akan mengunduh
+        # Coba muat data stopwords, jika gagal akan Raise LookupError
         nltk.data.find('corpora/stopwords') 
     except LookupError:
-        # Jika data tidak ditemukan, unduh. Ini dijalankan SATU KALI di Cloud.
+        # Jika data tidak ditemukan di lingkungan Cloud, unduh.
         nltk.download('stopwords')
 
     # 1. Stemmer Sastrawi
     factory = StemmerFactory()
     stemmer = factory.create_stemmer()
     
-    # 2. Stopwords (Sekarang NLTK sudah memiliki datanya)
+    # 2. Stopwords
     stop_id = set(stopwords.words('indonesian'))
     
-    return stemmer, stop_id
+    # Mengembalikan tuple dari sumber daya
+    return (stemmer, stop_id)
+
+# Panggil fungsi cache untuk memuat sumber daya ke variabel global
+# Hasilnya akan berupa tuple: (stemmer, stop_id)
+NLP_RESOURCES = load_nlp_resources()
 
 
-# --- Muat Model dan Vectorizer (Gunakan cache) ---
+# --- 2. MUAT MODEL DAN VECTORIZER (Menggunakan Cache) ---
 
 @st.cache_resource
 def load_model_assets():
@@ -56,14 +60,26 @@ def load_model_assets():
 
 vectorizer, model = load_model_assets()
 
+
+# --- 3. FUNGSI PRE-PROCESSING (Mengakses Sumber Daya dari Variabel Global) ---
+
 def preprocess_text(text):
-    """Pipeline Pra-Pemrosesan: Tokenisasi, Stopword Removal, Stemming."""
+    """
+    Pipeline Pra-Pemrosesan: Tokenisasi, Stopword Removal, Stemming.
+    Mengakses stemmer dan stop_id dari tuple NLP_RESOURCES yang dijamin ada.
+    """
+    if NLP_RESOURCES is None:
+        st.error("Sumber daya NLP gagal dimuat.")
+        return ""
+        
+    stemmer, stop_id = NLP_RESOURCES # Ekstrak stemmer dan stop_id dari tuple global
+
     if not isinstance(text, str):
         return ""
     
-    # 1. Cleaning (Optional, jika belum dibersihkan)
-    text = text.lower() # Ubah menjadi huruf kecil
-    text = re.sub(r'[^a-zA-Z\s]', '', text) # Hapus non-alfabet
+    # 1. Cleaning
+    text = text.lower() 
+    text = re.sub(r'[^a-zA-Z\s]', '', text) 
     
     # 2. Tokenisasi
     tokens = text.split()
@@ -71,11 +87,14 @@ def preprocess_text(text):
     # 3. Stopword Removal
     tokens = [t for t in tokens if t not in stop_id]
     
-    # 4. Stemming (menggunakan Sastrawi yang dimuat)
+    # 4. Stemming
     stems = [stemmer.stem(t) for t in tokens]
     
     # 5. Gabungkan kembali
     return " ".join(stems)
+
+
+# --- 4. FUNGSI UTAMA STREAMLIT ---
 
 def main():
     st.title("Classification SMS SPAM/HAM 📧")
@@ -94,7 +113,8 @@ def main():
     st.markdown("---")
     # ---------------------------
 
-    if model is None or vectorizer is None:
+    if model is None or vectorizer is None or NLP_RESOURCES is None:
+        st.error("Aplikasi tidak dapat dimuat karena model atau sumber daya NLP hilang/gagal dimuat.")
         return 
         
     st.subheader("Uji Prediksi Teks SMS")
@@ -113,7 +133,7 @@ def main():
                 # 2. Vektorisasi
                 text_vector = vectorizer.transform([processed_text])
                 
-                # 3. Prediksi (menggunakan Hard Voting)
+                # 3. Prediksi
                 prediction = model.predict(text_vector)[0]
                 
                 st.markdown("---")
@@ -136,12 +156,11 @@ def main():
                 
                 # B. Top 5 Fitur Penting (TF-IDF Scores)
                 if processed_text:
-                    # Dapatkan skor TF-IDF untuk kata-kata di teks input
                     feature_names = vectorizer.get_feature_names_out()
+                    # Menangani sparse matrix untuk skor
                     feature_index = text_vector.nonzero()[1]
                     tfidf_scores = text_vector.data
                     
-                    # Buat DataFrame untuk memvisualisasikan skor
                     df_scores = pd.DataFrame({
                         'Token': [feature_names[i] for i in feature_index],
                         'TF-IDF Score': tfidf_scores
@@ -150,28 +169,15 @@ def main():
                     st.subheader("Kata Kunci Penting (Top 5 TF-IDF)")
                     
                     if not df_scores.empty:
-                        # Tampilkan 5 kata dengan skor TF-IDF tertinggi (paling unik/penting)
                         st.table(df_scores.head(5))
                     else:
-                        st.warning("Tidak ada kata yang dikenali dalam kosakata model (Mungkin karena Stopword Removal yang terlalu agresif).")
+                        st.warning("Tidak ada kata yang dikenali dalam kosakata model.")
                 
-                # C. Prediksi Probabilitas (Jika Menggunakan Soft Voting, atau MNB/LR tunggal)
-                # Catatan: Hard Voting tidak menghasilkan probabilitas gabungan. 
-                # Untuk tujuan presentasi, kita bisa menampilkan probabilitas dari salah satu model dasarnya (misalnya MNB)
-                
-                # PENTING: Anda harus mengakses model dasar di dalam VotingClassifier
-                # Asumsi 'mnb' adalah nama estimator pertama ('mnb', clf1)
-                
+                # C. Prediksi Probabilitas dari MNB
                 try:
-                    mnb_estimator = model.estimators_[0] # Ambil estimator pertama (MNB)
-                    
-                    # Latih MNB estimator (jika belum terlatih - tapi harusnya sudah)
-                    # Jika model utama sudah terlatih, estimatornya sudah terlatih juga.
-                    
-                    # Dapatkan probabilitas dari MNB
+                    mnb_estimator = model.estimators_[0] 
                     probabilities = mnb_estimator.predict_proba(text_vector)[0]
                     
-                    # Urutan kelas: model.classes_
                     prob_ham = probabilities[np.where(model.classes_ == 'ham')[0][0]]
                     prob_spam = probabilities[np.where(model.classes_ == 'spam')[0][0]]
                     
@@ -185,8 +191,8 @@ def main():
                         st.write(f"Model sangat yakin ini adalah HAM (dengan probabilitas {prob_ham:.2f})")
                         
                 except Exception as e:
-                    # Tangani error jika struktur model ensemble berubah
-                    st.error(f"Gagal menampilkan detail probabilitas. {e}")
+                    # Ini mungkin terjadi jika urutan estimator diubah
+                    st.caption(f"Detail probabilitas (MNB) gagal ditampilkan.")
                     
 
         else:
