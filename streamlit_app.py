@@ -16,12 +16,10 @@ NLP_RESOURCES = None
 def load_nlp_resources():
     """Memuat Sastrawi Stemmer dan Stopwords Bahasa Indonesia, serta mengunduh data NLTK."""
     
-    # LANGKAH PENTING: Unduh data stopwords NLTK secara kondisional
+    # LANGKAH PENTING: Unduh data stopwords NLTK secara kondisional (Mengatasi LookupError di Cloud)
     try:
-        # Coba muat data stopwords, jika gagal akan Raise LookupError
         nltk.data.find('corpora/stopwords') 
     except LookupError:
-        # Jika data tidak ditemukan di lingkungan Cloud, unduh.
         nltk.download('stopwords')
 
     # 1. Stemmer Sastrawi
@@ -66,7 +64,7 @@ vectorizer, model = load_model_assets()
 def preprocess_text(text):
     """
     Pipeline Pra-Pemrosesan: Tokenisasi, Stopword Removal, Stemming.
-    Mengakses stemmer dan stop_id dari tuple NLP_RESOURCES yang dijamin ada.
+    Mengakses stemmer dan stop_id dari tuple NLP_RESOURCES yang dijamin ada. (Mengatasi NameError)
     """
     if NLP_RESOURCES is None:
         st.error("Sumber daya NLP gagal dimuat.")
@@ -95,8 +93,6 @@ def preprocess_text(text):
 
 
 # --- 4. FUNGSI UTAMA STREAMLIT ---
-
-# Ganti seluruh fungsi main() Anda dengan kode ini
 
 def main():
     st.title("Classification SMS SPAM/HAM 📧")
@@ -186,6 +182,9 @@ def main():
                     # 1. Prediksi Label (Suara)
                     individual_pred = estimator.predict(text_vector)[0]
                     
+                    # FIX: Konversi ke string standar untuk menghindari AttributeError
+                    pred_str = str(individual_pred)
+                    
                     confidence_score = ""
                     
                     # 2. Skor Keyakinan (Probabilitas atau Decision Function)
@@ -197,14 +196,13 @@ def main():
                         confidence_score = f"SPAM: {prob_spam:.4f} | HAM: {prob_ham:.4f}"
                     
                     elif hasattr(estimator, 'decision_function'):
-                        # LinearSVC mendukung Decision Function (Skor jarak dari hyperplane)
+                        # LinearSVC mendukung Decision Function
                         decision_score = estimator.decision_function(text_vector)[0]
                         confidence_score = f"Decision Score: {decision_score:.4f}"
-                        # Catatan: Nilai positif biasanya berarti 'spam', negatif berarti 'ham'.
                         
                     results.append({
                         'Model': estimator_names[i],
-                        'Prediksi (Suara)': individual_pred.upper(),
+                        'Prediksi (Suara)': pred_str.upper(),
                         'Skor Keyakinan': confidence_score
                     })
 
