@@ -64,7 +64,7 @@ vectorizer, model = load_model_assets()
 def preprocess_text(text):
     """
     Pipeline Pra-Pemrosesan: Tokenisasi, Stopword Removal, Stemming.
-    Mengakses stemmer dan stop_id dari tuple NLP_RESOURCES yang dijamin ada. (Mengatasi NameError)
+    Mengakses stemmer dan stop_id dari tuple NLP_RESOURCES yang dijamin ada.
     """
     if NLP_RESOURCES is None:
         st.error("Sumber daya NLP gagal dimuat.")
@@ -180,10 +180,12 @@ def main():
 
                 for i, estimator in enumerate(model.estimators_):
                     # 1. Prediksi Label (Suara)
-                    individual_pred = estimator.predict(text_vector)[0]
+                    # Ambil hasil prediksi (kemungkinan berupa index 0 atau 1)
+                    prediction_raw_index = estimator.predict(text_vector)[0]
                     
-                    # FIX: Konversi ke string standar untuk menghindari AttributeError
-                    pred_str = str(individual_pred)
+                    # FIX PENTING: Map index (0/1) kembali ke string label ('HAM'/'SPAM')
+                    # Gunakan model.classes_ untuk mendapatkan label string
+                    string_label = str(model.classes_[prediction_raw_index]).upper()
                     
                     confidence_score = ""
                     
@@ -202,13 +204,13 @@ def main():
                         
                     results.append({
                         'Model': estimator_names[i],
-                        'Prediksi (Suara)': pred_str.upper(),
+                        'Prediksi (Suara)': string_label, # Sekarang berisi 'HAM' atau 'SPAM'
                         'Skor Keyakinan': confidence_score
                     })
 
                 df_results = pd.DataFrame(results)
                 
-                # Menghitung Suara
+                # Menghitung Suara (Sekarang ini akan menghitung 'HAM' dan 'SPAM' yang benar)
                 ham_votes = df_results[df_results['Prediksi (Suara)'] == 'HAM'].shape[0]
                 spam_votes = df_results[df_results['Prediksi (Suara)'] == 'SPAM'].shape[0]
                 
