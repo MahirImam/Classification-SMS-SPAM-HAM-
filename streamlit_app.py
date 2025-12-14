@@ -10,20 +10,29 @@ import numpy as np
 
 # --- Inisialisasi Stemmer dan Stopwords (Gunakan cache) ---
 
+# --- Inisialisasi Stemmer dan Stopwords (Gunakan cache) ---
+
 @st.cache_resource
 def load_nlp_resources():
     """Memuat Sastrawi Stemmer dan Stopwords Bahasa Indonesia."""
+    
+    # LANGKAH PENTING: Unduh data stopwords NLTK
+    import nltk
+    try:
+        # Coba muat dulu, jika gagal, NLTK akan mengunduh
+        nltk.data.find('corpora/stopwords') 
+    except LookupError:
+        # Jika data tidak ditemukan, unduh. Ini dijalankan SATU KALI di Cloud.
+        nltk.download('stopwords')
+
     # 1. Stemmer Sastrawi
     factory = StemmerFactory()
     stemmer = factory.create_stemmer()
     
-    # 2. Stopwords
-    # Asumsi Anda menggunakan stopwords dari NLTK atau sumber lain
+    # 2. Stopwords (Sekarang NLTK sudah memiliki datanya)
     stop_id = set(stopwords.words('indonesian'))
     
     return stemmer, stop_id
-
-stemmer, stop_id = load_nlp_resources()
 
 
 # --- Muat Model dan Vectorizer (Gunakan cache) ---
