@@ -96,6 +96,8 @@ def preprocess_text(text):
 
 # --- 4. FUNGSI UTAMA STREAMLIT ---
 
+# Ganti seluruh fungsi main() Anda dengan kode ini
+
 def main():
     st.title("Classification SMS SPAM/HAM 📧")
     st.markdown("---")
@@ -133,31 +135,28 @@ def main():
                 # 2. Vektorisasi
                 text_vector = vectorizer.transform([processed_text])
                 
-                # 3. Prediksi
+                # 3. Prediksi (menggunakan Hard Voting)
                 prediction = model.predict(text_vector)[0]
                 
                 st.markdown("---")
                 
                 # 4. Tampilkan Hasil Utama
                 if prediction == 'spam':
-                    st.error(f"⚠️ **HASIL PREDIKSI: {prediction.upper()}**")
+                    st.error(f"⚠️ **HASIL PREDIKSI AKHIR: {prediction.upper()}**")
                     st.balloons()
-                    st.write("SMS ini kemungkinan adalah penipuan atau iklan yang tidak diinginkan.")
+                    st.write("Keputusan mayoritas model ensemble adalah **SPAM**.")
                 else:
-                    st.success(f"✅ **HASIL PREDIKSI: {prediction.upper()}**")
-                    st.write("SMS ini adalah pesan normal (bukan spam).")
+                    st.success(f"✅ **HASIL PREDIKSI AKHIR: {prediction.upper()}**")
+                    st.write("Keputusan mayoritas model ensemble adalah **HAM**.")
                     
                 
                 # 5. --- TAMBAHAN DETAIL ANALISIS ---
                 st.markdown("### 📊 Analisis Teknis Fitur")
-                
-                # A. Detail Pemrosesan
                 st.caption(f"Teks Setelah Pra-Pemrosesan: `{processed_text}`")
                 
                 # B. Top 5 Fitur Penting (TF-IDF Scores)
                 if processed_text:
                     feature_names = vectorizer.get_feature_names_out()
-                    # Menangani sparse matrix untuk skor
                     feature_index = text_vector.nonzero()[1]
                     tfidf_scores = text_vector.data
                     
@@ -171,30 +170,53 @@ def main():
                     if not df_scores.empty:
                         st.table(df_scores.head(5))
                     else:
-                        st.warning("Tidak ada kata yang dikenali dalam kosakata model.")
-                
-                # C. Prediksi Probabilitas dari MNB
-                try:
-                    mnb_estimator = model.estimators_[0] 
-                    probabilities = mnb_estimator.predict_proba(text_vector)[0]
-                    
-                    prob_ham = probabilities[np.where(model.classes_ == 'ham')[0][0]]
-                    prob_spam = probabilities[np.where(model.classes_ == 'spam')[0][0]]
-                    
-                    st.subheader("Probabilitas (dari Model Naive Bayes)")
-                    st.markdown(f"**Probabilitas HAM:** `{prob_ham:.4f}`")
-                    st.markdown(f"**Probabilitas SPAM:** `{prob_spam:.4f}`")
-                    
-                    if prob_spam > prob_ham:
-                        st.write(f"Model sangat yakin ini adalah SPAM (dengan probabilitas {prob_spam:.2f})")
-                    else:
-                        st.write(f"Model sangat yakin ini adalah HAM (dengan probabilitas {prob_ham:.2f})")
-                        
-                except Exception as e:
-                    # Ini mungkin terjadi jika urutan estimator diubah
-                    st.caption(f"Detail probabilitas (MNB) gagal ditampilkan.")
-                    
+                        st.warning("Tidak ada kata yang dikenali dalam kosakata model (Mungkin karena kata tersebut sangat jarang atau sudah dihapus).")
 
+
+                # C. PREDIKSI INDIVIDUAL DAN KONTRIBUSI SUARA
+                st.markdown("### 🗳️ Kontribusi Suara Model Dasar")
+                
+                estimator_names = ['Multinomial Naive Bayes (MNB)', 
+                                   'Logistic Regression (LR)', 
+                                   'LinearSVC (SVC)']
+                
+                results = []
+
+                for i, estimator in enumerate(model.estimators_):
+                    # 1. Prediksi Label (Suara)
+                    individual_pred = estimator.predict(text_vector)[0]
+                    
+                    confidence_score = ""
+                    
+                    # 2. Skor Keyakinan (Probabilitas atau Decision Function)
+                    if hasattr(estimator, 'predict_proba'):
+                        # MNB dan LR mendukung Probabilitas
+                        probabilities = estimator.predict_proba(text_vector)[0]
+                        prob_spam = probabilities[np.where(model.classes_ == 'spam')[0][0]]
+                        prob_ham = probabilities[np.where(model.classes_ == 'ham')[0][0]]
+                        confidence_score = f"SPAM: {prob_spam:.4f} | HAM: {prob_ham:.4f}"
+                    
+                    elif hasattr(estimator, 'decision_function'):
+                        # LinearSVC mendukung Decision Function (Skor jarak dari hyperplane)
+                        decision_score = estimator.decision_function(text_vector)[0]
+                        confidence_score = f"Decision Score: {decision_score:.4f}"
+                        # Catatan: Nilai positif biasanya berarti 'spam', negatif berarti 'ham'.
+                        
+                    results.append({
+                        'Model': estimator_names[i],
+                        'Prediksi (Suara)': individual_pred.upper(),
+                        'Skor Keyakinan': confidence_score
+                    })
+
+                df_results = pd.DataFrame(results)
+                
+                # Menghitung Suara
+                ham_votes = df_results[df_results['Prediksi (Suara)'] == 'HAM'].shape[0]
+                spam_votes = df_results[df_results['Prediksi (Suara)'] == 'SPAM'].shape[0]
+                
+                st.table(df_results)
+                st.markdown(f"**Total Suara: HAM ({ham_votes}) vs. SPAM ({spam_votes})**")
+                
         else:
             st.warning("Mohon masukkan teks SMS untuk diklasifikasi.")
 
