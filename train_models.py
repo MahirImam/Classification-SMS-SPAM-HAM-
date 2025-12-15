@@ -1,174 +1,181 @@
 import pandas as pd
 import numpy as np
 import pickle
-import nltk
+import re
 from nltk.corpus import stopwords
-from Sastrawi.Stemmer.StemmerFactory import StemmerFactory
-from sklearn.feature_extraction.text import TfidfVectorizer
+from nltk.tokenize import word_tokenize
 from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
+
+# Import Model untuk Klasifikasi
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.ensemble import VotingClassifier
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.svm import LinearSVC
-from sklearn.ensemble import VotingClassifier
+from sklearn.tree import DecisionTreeClassifier # Pengganti Logistic Regression
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+
+# Import Model untuk Regresi
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+# Import Model untuk Clustering
 from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-import matplotlib.pyplot as plt
-import os
-import seaborn as sns
 
-# =========================================================
-# BAGIAN 1: SETUP DAN LOAD DATA
-# =========================================================
+# --- KONFIGURASI FILE ---
+FILE_PATH = 'data/sms_spam_preprocessed.csv' 
+LABEL_COLUMN = 'Kategori' # <--- PERBAIKAN: Ganti 'label' dengan 'Kategori'
+TEXT_COLUMN = 'processed_text'
 
-# Buat folder untuk visualisasi
-if not os.path.exists('image_modelling'):
-    os.makedirs('image_modelling')
 
+# --- 1. FUNGSI PREPROCESSING DASAR ---
+def preprocess_text(text):
+    if not isinstance(text, str):
+        return ""
+    # Hapus karakter non-alfanumerik
+    text = re.sub(r'[^a-zA-Z\s]', '', text, re.I|re.A)
+    # Ubah menjadi lowercase
+    text = text.lower()
+    # Tokenisasi dan hapus angka
+    tokens = [word for word in word_tokenize(text) if word.isalpha()]
+    return " ".join(tokens)
+
+# --- 2. SETUP STOPWORDS ---
+# Inisialisasi stopwords (contoh menggunakan gabungan Indonesia dan Inggris)
 try:
-    nltk.data.find('corpora/stopwords') 
+    stop_words_id = set(stopwords.words('indonesian'))
+    stop_words_en = set(stopwords.words('english'))
+    final_stopwords = stop_words_id.union(stop_words_en)
 except LookupError:
-    nltk.download('stopwords')
+    # Jika NLTK belum diunduh, jalankan 'import nltk; nltk.download('stopwords')'
+    # Jika masih error, gunakan set kosong atau list stopwords manual
+    print("NLTK Stopwords tidak ditemukan. Gunakan list stopwords kosong.")
+    final_stopwords = set()
 
-factory = StemmerFactory()
-stemmer = factory.create_stemmer()
-stop_id = set(stopwords.words('indonesian'))
 
-# *** FILE PATH DAN KOLOM YANG BENAR ***
-FILE_PATH = 'data/sms_spam_preprocessed.csv' # File harus berada di direktori yang sama
-TEXT_COLUMN = 'processed_text' 
-LABEL_COLUMN = 'Kategori'      
-
+# --- 3. LOAD DATA DAN PREPARASI TARGET ---
+print("--- START: Training dan Saving Model ---")
 try:
     df = pd.read_csv(FILE_PATH)
+    
+    # Cleaning data yang mungkin terlewat di pre-processing
+    df[TEXT_COLUMN] = df[TEXT_COLUMN].fillna('').apply(preprocess_text)
+    
+    # Memisahkan fitur dan target
     X_text = df[TEXT_COLUMN]
-    y = df[LABEL_COLUMN]
-    print(f"Dataset berhasil dimuat. Total data: {len(df)}")
+    
+    # Target untuk Klasifikasi (string: 'ham', 'spam')
+    y_cls = df[LABEL_COLUMN] 
+
+    # Target untuk REGRESI (numerik: 0.0, 1.0)
+    # Ini untuk memenuhi persyaratan tugas Regresi non-Logistik
+    df['target_score'] = df[LABEL_COLUMN].apply(lambda x: 1.0 if x == 'spam' else 0.0)
+    y_reg = df['target_score']
+    
+    print(f"Dataset berhasil dimuat. Total data: {len(df)} baris.")
+    
+except FileNotFoundError:
+    print(f"Error: File '{FILE_PATH}' tidak ditemukan. Mohon cek path file.")
+    exit()
 except Exception as e:
-    print(f"FATAL ERROR: Gagal memuat data! Pastikan '{FILE_PATH}' ada di direktori yang sama. Error: {e}")
+    print(f"Error saat memuat data: {e}")
     exit()
 
-# =========================================================
-# BAGIAN 2: TRAINING MODEL (KLASIFIKASI & CLUSTERING)
-# =========================================================
 
-# 1. PELATIHAN VECTORIZER (TF-IDF)
-vectorizer = TfidfVectorizer()
+# --- 4. VECTORIZATION (TF-IDF) ---
+# **PENTING: X_tfidf harus didefinisikan sebelum train_test_split!**
+vectorizer = TfidfVectorizer(stop_words=list(final_stopwords), max_features=5000) 
 X_tfidf = vectorizer.fit_transform(X_text)
-print("\nVectorizer TF-IDF berhasil dilatih.")
+print("Vectorizer TF-IDF berhasil dilatih.")
 
-# 2. PELATIHAN ENSEMBLE MODEL (KLASIFIKASI)
+
+# --- 5. PEMISAHAN DATA ---
+# Pemisahan data untuk Klasifikasi
+X_train_cls, X_test_cls, y_train_cls, y_test_cls = train_test_split(
+    X_tfidf, y_cls, test_size=0.2, random_state=42, stratify=y_cls
+)
+
+# Pemisahan data untuk Regresi
+X_train_reg, X_test_reg, y_train_reg, y_test_reg = train_test_split(
+    X_tfidf, y_reg, test_size=0.2, random_state=42, stratify=y_reg
+)
+print("Data berhasil dipisah (80% Training, 20% Testing) untuk Klasifikasi dan Regresi.")
+
+
+# =========================================================
+# BAGIAN A: PELATIHAN MODEL REGRESI (Linear Regression)
+# =========================================================
+print("\n--- A. REGRESI LINEAR ---")
+linear_reg_model = LinearRegression()
+linear_reg_model.fit(X_train_reg, y_train_reg)
+print("Model Regresi Linear berhasil dilatih.")
+
+# Evaluasi Regresi
+y_pred_reg = linear_reg_model.predict(X_test_reg)
+mse = mean_squared_error(y_test_reg, y_pred_reg)
+r2 = r2_score(y_test_reg, y_pred_reg)
+print(f"  > Mean Squared Error (MSE): {mse:.4f}")
+print(f"  > R2 Score: {r2:.4f}")
+print("   (Metrik ini harus dimasukkan ke Laporan Regresi)")
+
+
+# =========================================================
+# BAGIAN B: PELATIHAN MODEL KLASIFIKASI (Voting Classifier)
+# =========================================================
+print("\n--- B. KLASIFIKASI (Voting Classifier) ---")
+
+# Ganti Logistic Regression dengan Decision Tree Classifier
 voting_clf = VotingClassifier(
     estimators=[
-        ('mnb', MultinomialNB()), 
-        ('lr', LogisticRegression(random_state=42, solver='liblinear')), 
-        ('svc', LinearSVC(random_state=42))
+        ('mnb', MultinomialNB(alpha=1.0)), 
+        ('dt', DecisionTreeClassifier(random_state=42)), 
+        ('svc', LinearSVC(random_state=42, dual=False)) # dual=False untuk data besar
     ],
     voting='hard'  
 )
-voting_clf.fit(X_tfidf, y)
-print("Voting Classifier (Ensemble) berhasil dilatih.")
+voting_clf.fit(X_train_cls, y_train_cls)
+print("Voting Classifier (Ensemble: MNB, DT, SVC) berhasil dilatih.")
 
-# 3. PELATIHAN K-MEANS (CLUSTERING)
-K = 3 
-kmeans = KMeans(n_clusters=K, random_state=42, n_init='auto') 
-kmeans.fit(X_tfidf)
-print(f"Model K-Means (K={K}) berhasil dilatih.")
+# Evaluasi Klasifikasi
+y_pred_cls = voting_clf.predict(X_test_cls)
+print("\n  > Classification Report:")
+print(classification_report(y_test_cls, y_pred_cls))
+print(f"  > Akurasi (Total Test Data): {accuracy_score(y_test_cls, y_pred_cls):.4f}")
+print(f"  > Confusion Matrix:\n{confusion_matrix(y_test_cls, y_pred_cls)}")
 
-# Tambahkan impor evaluasi
-from sklearn.metrics import confusion_matrix, classification_report
-import seaborn as sns # Sudah diimpor di atas
-
-# 1. PEMISAHAN DATA (Diulang di sini agar X_test tersedia untuk evaluasi)
-X_train, X_test, y_train, y_test = train_test_split(
-    X_tfidf, y, test_size=0.2, random_state=42, stratify=y
-)
-
-# 2. PREDIKSI
-y_pred = voting_clf.predict(X_test)
-
-print("\n--- Evaluasi Klasifikasi (Voting Classifier) ---")
-print("\nClassification Report:")
-print(classification_report(y_test, y_pred))
-
-# 3. BUAT CONFUSION MATRIX (Visualisasi Standar)
-cm = confusion_matrix(y_test, y_pred, labels=voting_clf.classes_)
-cm_df = pd.DataFrame(cm, 
-                     index = voting_clf.classes_, 
-                     columns = voting_clf.classes_)
-
-plt.figure(figsize=(8, 6))
-sns.heatmap(cm_df, annot=True, fmt='g', cmap='Reds', cbar=False)
-plt.title('Confusion Matrix: Voting Classifier')
-plt.ylabel('Actual Label')
-plt.xlabel('Predicted Label')
-
-# Simpan Gambar Visualisasi
-CM_PATH = 'image_modelling/classification_confusion_matrix.png'
-plt.savefig(CM_PATH)
-plt.close()
-
-print(f"Visualisasi Confusion Matrix berhasil disimpan di: {CM_PATH}")
-
-# --- Tambahan: Ekstraksi Kata Kunci Kluster ---
-print("\n[DEBUG] Mengekstrak 10 kata kunci teratas untuk setiap Kluster...")
-# Dapatkan fitur/kata-kata dari vectorizer
-feature_names = vectorizer.get_feature_names_out()
-
-# Dapatkan pusat kluster (centroids)
-cluster_centroids = kmeans.cluster_centers_
-
-# Dictionary untuk menyimpan kata kunci kluster
-cluster_keywords = {}
-
-for i in range(kmeans.n_clusters):
-    # Dapatkan bobot fitur untuk kluster ke-i
-    centroid = cluster_centroids[i]
-    
-    # Dapatkan 10 indeks fitur dengan bobot tertinggi
-    top_10_indices = centroid.argsort()[-10:][::-1]
-    
-    # Dapatkan nama fitur (kata-kata) dari indeks tersebut
-    top_10_keywords = [feature_names[j] for j in top_10_indices]
-    
-    cluster_keywords[i] = top_10_keywords
-    print(f"  Kluster #{i}: {', '.join(top_10_keywords)}")
-
-# --- SIMPAN KATA KUNCI KLUSTER ---
-with open('cluster_keywords.pkl', 'wb') as f:
-    pickle.dump(cluster_keywords, f)
-print("-> cluster_keywords.pkl berhasil disimpan.")
 
 # =========================================================
-# BAGIAN 3: SIMPAN SEMUA ASSET (.pkl)
+# BAGIAN C: PELATIHAN MODEL CLUSTERING (K-Means)
 # =========================================================
+print("\n--- C. CLUSTERING (K-Means) ---")
 
-with open('voting_classifier_model.pkl', 'wb') as f:
-    pickle.dump(voting_clf, f)
-print("-> voting_classifier_model.pkl berhasil disimpan.")
+# Kita asumsikan K=3 berdasarkan diskusi sebelumnya
+K_CLUSTERS = 3 
+kmeans_model = KMeans(n_clusters=K_CLUSTERS, random_state=42, n_init=10)
+kmeans_model.fit(X_tfidf)
+print(f"Model K-Means (K={K_CLUSTERS}) berhasil dilatih.")
 
+
+# --- 6. SIMPAN SEMUA MODEL (.pkl) ---
+print("\n--- SAVING MODELS ---")
+
+# 1. Simpan Vectorizer TF-IDF
 with open('tfidf_vectorizer.pkl', 'wb') as f:
     pickle.dump(vectorizer, f)
 print("-> tfidf_vectorizer.pkl berhasil disimpan.")
 
-with open('kmeans_model.pkl', 'wb') as file:
-    pickle.dump(kmeans, file)
+# 2. Simpan Model Klasifikasi
+with open('voting_classifier_model.pkl', 'wb') as f:
+    pickle.dump(voting_clf, f)
+print("-> voting_classifier_model.pkl berhasil disimpan.")
+
+# 3. Simpan Model Regresi
+with open('linear_reg_model.pkl', 'wb') as f:
+    pickle.dump(linear_reg_model, f)
+print("-> linear_reg_model.pkl berhasil disimpan.")
+
+# 4. Simpan Model Clustering
+with open('kmeans_model.pkl', 'wb') as f:
+    pickle.dump(kmeans_model, f)
 print("-> kmeans_model.pkl berhasil disimpan.")
 
-
-# =========================================================
-# BAGIAN 4: VISUALISASI PCA (UNTUK PRESENTASI)
-# =========================================================
-print("\nMembuat Visualisasi Clustering...")
-pca = PCA(n_components=2, random_state=42)
-X_pca = pca.fit_transform(X_tfidf.toarray()) 
-
-df_pca = pd.DataFrame(data=X_pca, columns=['PC_1', 'PC_2'])
-df_pca['Cluster'] = kmeans.labels_ 
-
-plt.figure(figsize=(10, 8))
-sns.scatterplot(x='PC_1', y='PC_2', hue='Cluster', data=df_pca, palette='viridis', style='Cluster', s=70)
-plt.savefig('image_modelling/sms_clustering_visualization.png')
-print("Visualisasi Clustering berhasil disimpan.")
-
-
-print("\n--- SEMUA MODEL BERHASIL DILATIH & DISIMPAN. SIAP DEPLOY ---")
+print("\n--- SEMUA MODEL BERHASIL DILATIH DAN DISIMPAN ---")
