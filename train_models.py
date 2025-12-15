@@ -69,7 +69,7 @@ voting_clf.fit(X_tfidf, y)
 print("Voting Classifier (Ensemble) berhasil dilatih.")
 
 # 3. PELATIHAN K-MEANS (CLUSTERING)
-K = 4 
+K = 3 
 kmeans = KMeans(n_clusters=K, random_state=42, n_init='auto') 
 kmeans.fit(X_tfidf)
 print(f"Model K-Means (K={K}) berhasil dilatih.")
@@ -109,6 +109,34 @@ plt.close()
 
 print(f"Visualisasi Confusion Matrix berhasil disimpan di: {CM_PATH}")
 
+# --- Tambahan: Ekstraksi Kata Kunci Kluster ---
+print("\n[DEBUG] Mengekstrak 10 kata kunci teratas untuk setiap Kluster...")
+# Dapatkan fitur/kata-kata dari vectorizer
+feature_names = vectorizer.get_feature_names_out()
+
+# Dapatkan pusat kluster (centroids)
+cluster_centroids = kmeans.cluster_centers_
+
+# Dictionary untuk menyimpan kata kunci kluster
+cluster_keywords = {}
+
+for i in range(kmeans.n_clusters):
+    # Dapatkan bobot fitur untuk kluster ke-i
+    centroid = cluster_centroids[i]
+    
+    # Dapatkan 10 indeks fitur dengan bobot tertinggi
+    top_10_indices = centroid.argsort()[-10:][::-1]
+    
+    # Dapatkan nama fitur (kata-kata) dari indeks tersebut
+    top_10_keywords = [feature_names[j] for j in top_10_indices]
+    
+    cluster_keywords[i] = top_10_keywords
+    print(f"  Kluster #{i}: {', '.join(top_10_keywords)}")
+
+# --- SIMPAN KATA KUNCI KLUSTER ---
+with open('cluster_keywords.pkl', 'wb') as f:
+    pickle.dump(cluster_keywords, f)
+print("-> cluster_keywords.pkl berhasil disimpan.")
 
 # =========================================================
 # BAGIAN 3: SIMPAN SEMUA ASSET (.pkl)
